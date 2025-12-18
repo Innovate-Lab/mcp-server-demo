@@ -27,6 +27,35 @@ class Settings(BaseSettings):
 
     # Storage
     STATIC_DIR: str = Field(default="static", description="Static folder name")
+    STORAGE_BACKEND: str = Field(
+        default="auto",
+        description="Storage backend: auto|local|gcs",
+    )
+    GCS_BUCKET: str = Field(default="", description="GCS bucket name")
+    GCS_PREFIX: str = Field(default="", description="GCS object prefix")
+    GCS_PUBLIC_READ: bool = Field(default=True, description="Make uploaded objects public")
+    MAX_IMAGE_DOWNLOAD_BYTES: int = Field(
+        default=20 * 1024 * 1024,
+        description="Max bytes allowed when downloading image_url",
+    )
+
+    # Gemini
+    GEMINI_BASE_URL: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        description="Gemini REST base URL",
+    )
+    GEMINI_IMAGE_MODEL: str = Field(
+        default="gemini-2.0-flash-exp-image-generation",
+        description="Gemini model id for image generation",
+    )
+    GEMINI_VISION_MODEL: str = Field(
+        default="gemini-2.5-flash",
+        description="Gemini model id for vision / OCR / analysis",
+    )
+    HTTP_TIMEOUT_SECONDS: float = Field(
+        default=120.0,
+        description="Timeout for outbound HTTP requests",
+    )
 
     # Public URL
     BASE_URL: str = Field(default="", description="Public base url")
@@ -57,9 +86,12 @@ def get_settings() -> Settings:
         host_for_url = "localhost" if s.MCP_HOST in ("0.0.0.0", "::") else s.MCP_HOST
         s.BASE_URL = f"http://{host_for_url}:{s.MCP_PORT}"
 
-    # Ensure exists
-    static_path = BASE_DIR / s.STATIC_DIR
-    os.makedirs(static_path, exist_ok=True)
+    # Ensure local static folder exists when using local storage
+    backend = (s.STORAGE_BACKEND or "auto").strip().lower()
+    use_gcs = bool(s.GCS_BUCKET) and backend in ("auto", "gcs")
+    if not use_gcs:
+        static_path = BASE_DIR / s.STATIC_DIR
+        os.makedirs(static_path, exist_ok=True)
 
     return s
 

@@ -23,6 +23,10 @@ def verify_api_key(headers) -> None:
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        # Allow health check, static files, and CORS preflight without auth
+        if request.method.upper() == "OPTIONS":
+            return await call_next(request)
+
         path = request.url.path or ""
         if path == "/health" or path.startswith("/static"):
             return await call_next(request)
