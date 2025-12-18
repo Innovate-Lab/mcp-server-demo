@@ -5,3 +5,15 @@ __pycache__/
 .env.*
 .DS_Store
 static/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+.vscode/
+.idea/
+Thumbs.db
+.uv/
+uv.lock
