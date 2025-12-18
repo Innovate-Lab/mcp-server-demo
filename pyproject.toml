@@ -1,0 +1,18 @@
+[project]
+name = "mcp-demo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "anyio",
+    "google-cloud-storage",
+    "httpx",
+    "mcp[cli]",
+    "pydantic",
+    "python-dotenv",
+    "starlette",
+    "pydantic-settings",
+    "uvicorn"
+]
