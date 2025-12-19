@@ -1,11 +1,154 @@
 from __future__ import annotations
 
-from src.storage import save_file_locally
+import os
+import asyncio
+import logging
+import base64
+import time
+import httpx
+import re
+from typing import Optional, List, Any, Dict
 
+# --- CẤU HÌNH ---
+OUTPUT_FOLDER = "Video_Results"
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
-_MIN_MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00isomiso2"
+from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
+load_dotenv()
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
+logger = logging.getLogger(__name__)
+
+# Danh sách Model (Ưu tiên Veo 3.1)
+FALLBACK_MODELS = [
+"veo-3.0-generate-001",
+"veo-3.0-fast-generate-001",
+"veo-3.1-generate-001",
+"veo-3.1-fast-generate-001",
+"veo-3.1-generate-preview"
+]
+TIMEOUT_SECONDS = 600 
+POLLING_INTERVAL = 10 
+
+# --- HÀM LƯU FILE LOCAL ---
+try:
+    from src.storage import save_file_locally
+except ImportError:
+    async def save_file_locally(content: bytes, extension: str, filename_hint: str) -> dict:
+        clean_name = re.sub(r'[^\w\-]', '_', filename_hint)
+        timestamp = int(time.time())
+        filename = f"{clean_name}_{timestamp}.{extension}"
+        file_path = os.path.join(OUTPUT_FOLDER, filename)
+        with open(file_path, "wb") as f:
+            f.write(content)
+        abs_path = os.path.abspath(file_path)
+        logger.info(f"💾 Đã lưu file tại: {abs_path}")
+        return {"url": abs_path, "gs_uri": ""}
+
+# --- CÁC HÀM HỖ TRỢ API ---
+def _get_client() -> genai.Client:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not set in environment variables.")
+    return genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
+
+async def _download_video_from_uri(uri: str) -> bytes:
+    api_key = os.getenv("GEMINI_API_KEY")
+    headers = {}
+    if "googleapis.com" in uri and api_key:
+        headers["x-goog-api-key"] = api_key
+
+    async with httpx.AsyncClient() as client:
+        logger.info(f"⬇️ Đang tải video từ: {uri}")
+        response = await client.get(uri, headers=headers, follow_redirects=True)
+        response.raise_for_status()
+        return response.content
+
+async def _poll_operation_via_rest(operation_name: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY")
+    start_time = time.time()
+    base_url = "https://generativelanguage.googleapis.com/v1alpha"
+    url = operation_name if operation_name.startswith("http") else f"{base_url}/{operation_name}"
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
+
+    logger.info(f"⏳ Bắt đầu theo dõi tiến trình: {url}")
+    async with httpx.AsyncClient() as http_client:
+        while True:
+            if int(time.time() - start_time) > TIMEOUT_SECONDS:
+                raise TimeoutError("Quá thời gian chờ.")
+            try:
+                response = await http_client.get(url, headers=headers)
+                if response.status_code != 200:
+                    await asyncio.sleep(POLLING_INTERVAL)
+                    continue
+                data = response.json()
+                if data.get("done", False):
+                    if "error" in data: raise RuntimeError(data['error'])
+                    payload = data.get("response") or data.get("result") or data
+                    
+                    if "generateVideoResponse" in payload:
+                        val = payload["generateVideoResponse"]
+                        if "generatedSamples" in val: return val["generatedSamples"][0]["video"]["uri"]
+                    if "generatedSamples" in payload: return payload["generatedSamples"][0]["video"]["uri"]
+                    if "generatedVideos" in payload: return payload["generatedVideos"][0]["video"]["uri"]
+                    if "generated_videos" in payload: return payload["generated_videos"][0]["video"]["uri"]
+                    
+                    logger.error(f"Unknown Payload: {payload}")
+                    raise ValueError("Không tìm thấy URI video.")
+            except Exception:
+                pass
+            await asyncio.sleep(POLLING_INTERVAL)
+
+async def _prepare_inputs(prompt: str, image_url: str | None, image_base64: str | None, image_mime_type: str | None = None) -> Optional[types.Image]:
+    """
+    Chuẩn bị đối tượng types.Image.
+    Hỗ trợ tự động làm sạch chuỗi Base64 và định danh Mime Type.
+    """
+    image_bytes = None
+    final_mime_type = image_mime_type or "image/jpeg" # Ưu tiên tham số truyền vào, mặc định là jpeg
+
+    if image_url:
+        logger.info(f"📥 Đang tải ảnh từ URL: {image_url}")
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(image_url, follow_redirects=True)
+            if resp.status_code != 200:
+                raise ValueError(f"Lỗi tải ảnh: {resp.status_code}")
+            image_bytes = resp.content
+            
+            # Tự động lấy Content-Type từ header HTTP nếu chưa có
+            if not image_mime_type:
+                content_type = resp.headers.get("content-type")
+                if content_type:
+                    final_mime_type = content_type
+                
+    elif image_base64:
+        # 1. Xử lý Data URI (ví dụ: "data:image/png;base64,iVBORw0KG...")
+        if "," in image_base64:
+            header, encoded = image_base64.split(",", 1)
+            # Cố gắng lấy mime type từ header nếu user không truyền vào
+            if not image_mime_type and "data:" in header and ";base64" in header:
+                try:
+                    final_mime_type = header.split("data:")[1].split(";")[0]
+                except IndexError:
+                    pass
+            image_base64 = encoded # Chỉ lấy phần chuỗi mã hóa
+            
+        try:
+            image_bytes = base64.b64decode(image_base64)
+        except Exception as e:
+            raise ValueError(f"Chuỗi Base64 không hợp lệ: {str(e)}")
+    
+    if image_bytes:
+        logger.info(f"🖼️ Input Image MimeType: {final_mime_type}")
+        return types.Image(
+            image_bytes=image_bytes, 
+            mime_type=final_mime_type 
+        )
+    
+    return None
 async def create_video(
     prompt: str,
     negative_prompt: str | None = None,
@@ -16,19 +159,73 @@ async def create_video(
     image_mime_type: str | None = None,
     filename_hint: str | None = None,
 ) -> dict:
+    
+    try:
+        client = _get_client()
+    except Exception as e:
+        return {"error": str(e)}
 
-    model = "veo-3.0-generate-001"
-    saved = await save_file_locally(_MIN_MP4, extension="mp4", filename_hint=filename_hint or "video")
+    # Chuẩn bị Image Input
+    image_input = None
+    try:
+        image_input = await _prepare_inputs(prompt, image_url, image_base64)
+    except Exception as e:
+        return {"error": f"Input Error: {str(e)}"}
 
+    generation_config = {"aspectRatio": aspect_ratio, "durationSeconds": 8}
+    if negative_prompt: generation_config["negativePrompt"] = negative_prompt
+
+    last_error = None
+    saved_video_info = None
+    used_model = None
+
+    for model_name in FALLBACK_MODELS:
+        try:
+            logger.info(f"🚀 Model: {model_name}")
+            
+            if image_input:
+                logger.info("ℹ️ Mode: Image-to-Video")
+                # Truyền prompt string và image object riêng biệt
+                response = await client.aio.models.generate_videos(
+                    model=model_name,
+                    prompt=prompt,      
+                    image=image_input,  
+                    config=generation_config
+                )
+            else:
+                logger.info("ℹ️ Mode: Text-to-Video")
+                response = await client.aio.models.generate_videos(
+                    model=model_name,
+                    prompt=prompt,
+                    config=generation_config
+                )
+
+            op_name = response.name if hasattr(response, 'name') else str(response)
+            logger.info(f"📡 Op ID: {op_name}")
+            
+            video_uri = await _poll_operation_via_rest(op_name)
+            video_bytes = await _download_video_from_uri(video_uri)
+            
+            saved = await save_file_locally(video_bytes, "mp4", filename_hint or "veo_generated")
+            saved_video_info = saved
+            used_model = model_name
+            break 
+
+        except Exception as e:
+            logger.warning(f"❌ {model_name} Failed: {str(e)}")
+            last_error = e
+            continue
+
+    if not saved_video_info:
+        return {"error": f"Failed: {str(last_error)}", "prompt": prompt, "model": "failed"}
+
+    # --- OUTPUT CHUẨN FORM JSON ---
     return {
         "prompt": prompt,
-        "model": model,
+        "model": used_model,
         "aspect_ratio": aspect_ratio,
         "resolution": resolution,
-        "negative_prompt": negative_prompt,
         "mime_type": "video/mp4",
-        "url": saved["url"],
-        "gs_uri": saved.get("gs_uri", ""),
-        "input_image": image_url or ("<base64>" if image_base64 else None),
-        "input_image_mime_type": image_mime_type,
+        "url": saved_video_info["url"],
+        "gs_uri": saved_video_info.get("gs_uri", "")
     }

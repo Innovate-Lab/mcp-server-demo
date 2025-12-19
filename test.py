@@ -24,8 +24,11 @@ logger = logging.getLogger(__name__)
 
 # Danh sách Model (Ưu tiên Veo 3.1)
 FALLBACK_MODELS = [
-    "veo-3.0-fast-generate-001",
-    "veo-3.1-fast-generate-001"
+"veo-3.0-generate-001",
+"veo-3.0-fast-generate-001",
+"veo-3.1-generate-001",
+"veo-3.1-fast-generate-001",
+"veo-3.1-generate-preview"
 ]
 TIMEOUT_SECONDS = 600 
 POLLING_INTERVAL = 10 
@@ -99,12 +102,14 @@ async def _poll_operation_via_rest(operation_name: str) -> str:
                 pass
             await asyncio.sleep(POLLING_INTERVAL)
 
-async def _prepare_inputs(prompt: str, image_url: str | None, image_base64: str | None) -> Optional[types.Image]:
+async def _prepare_inputs(prompt: str, image_url: str | None, image_base64: str | None, image_mime_type: str | None = None) -> Optional[types.Image]:
     """
-    [CẬP NHẬT] Sử dụng types.Image với image_bytes (Raw) và mime_type.
-    SDK sẽ tự động chuyển Raw Bytes thành Base64 khi gửi đi.
+    Chuẩn bị đối tượng types.Image.
+    Hỗ trợ tự động làm sạch chuỗi Base64 và định danh Mime Type.
     """
     image_bytes = None
+    final_mime_type = image_mime_type or "image/jpeg" # Ưu tiên tham số truyền vào, mặc định là jpeg
+
     if image_url:
         logger.info(f"📥 Đang tải ảnh từ URL: {image_url}")
         async with httpx.AsyncClient() as client:
@@ -112,19 +117,38 @@ async def _prepare_inputs(prompt: str, image_url: str | None, image_base64: str 
             if resp.status_code != 200:
                 raise ValueError(f"Lỗi tải ảnh: {resp.status_code}")
             image_bytes = resp.content
+            
+            # Tự động lấy Content-Type từ header HTTP nếu chưa có
+            if not image_mime_type:
+                content_type = resp.headers.get("content-type")
+                if content_type:
+                    final_mime_type = content_type
+                
     elif image_base64:
-        image_bytes = base64.b64decode(image_base64)
+        # 1. Xử lý Data URI (ví dụ: "data:image/png;base64,iVBORw0KG...")
+        if "," in image_base64:
+            header, encoded = image_base64.split(",", 1)
+            # Cố gắng lấy mime type từ header nếu user không truyền vào
+            if not image_mime_type and "data:" in header and ";base64" in header:
+                try:
+                    final_mime_type = header.split("data:")[1].split(";")[0]
+                except IndexError:
+                    pass
+            image_base64 = encoded # Chỉ lấy phần chuỗi mã hóa
+            
+        try:
+            image_bytes = base64.b64decode(image_base64)
+        except Exception as e:
+            raise ValueError(f"Chuỗi Base64 không hợp lệ: {str(e)}")
     
     if image_bytes:
-        # Quan trọng: Cung cấp cả image_bytes (Raw) và mime_type
-        # SDK sẽ map image_bytes -> bytesBase64Encoded trong JSON request
+        logger.info(f"🖼️ Input Image MimeType: {final_mime_type}")
         return types.Image(
             image_bytes=image_bytes, 
-            mime_type="image/jpeg" # Hoặc image/png, Veo sẽ tự xử lý
+            mime_type=final_mime_type 
         )
     
     return None
-
 async def create_video(
     prompt: str,
     negative_prompt: str | None = None,
@@ -141,7 +165,7 @@ async def create_video(
     except Exception as e:
         return {"error": str(e)}
 
-    # Chuẩn bị Image Input (types.Image)
+    # Chuẩn bị Image Input
     image_input = None
     try:
         image_input = await _prepare_inputs(prompt, image_url, image_base64)
@@ -159,13 +183,13 @@ async def create_video(
         try:
             logger.info(f"🚀 Model: {model_name}")
             
-            # Sử dụng cú pháp tham số image=... VÀ prompt=String
             if image_input:
-                logger.info("ℹ️ Mode: Image-to-Video (types.Image)")
+                logger.info("ℹ️ Mode: Image-to-Video")
+                # Truyền prompt string và image object riêng biệt
                 response = await client.aio.models.generate_videos(
                     model=model_name,
-                    prompt=prompt,       # String
-                    image=image_input,   # types.Image
+                    prompt=prompt,      
+                    image=image_input,  
                     config=generation_config
                 )
             else:
@@ -195,28 +219,31 @@ async def create_video(
     if not saved_video_info:
         return {"error": f"Failed: {str(last_error)}", "prompt": prompt, "model": "failed"}
 
+    # --- OUTPUT CHUẨN FORM JSON ---
     return {
         "prompt": prompt,
         "model": used_model,
+        "aspect_ratio": aspect_ratio,
+        "resolution": resolution,
+        "mime_type": "video/mp4",
         "url": saved_video_info["url"],
         "gs_uri": saved_video_info.get("gs_uri", "")
     }
 
 if __name__ == "__main__":
     async def main():
-        print("\n--- FINAL TEST (VEO 3.0 Corrected) ---")
+        print("\n--- FINAL TEST (VEO 3.0 + JSON Standard) ---")
         
         target_image_url = "https://imgs.search.brave.com/pYaCqSFk0YB33dVMPQRjzbyNs37L5xq9usgq-5rauTE/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9jZG4x/MS5iaWdjb21tZXJj/ZS5jb20vcy1hMzFj/OC9pbWFnZXMvc3Rl/bmNpbC82MDB4NjAw/L3Byb2R1Y3RzLzMw/NjUyLzM0MjQ5LzQ1/NzMxMDI2MTMyODhf/Xzk5OTIzLjE2OTcy/OTE4NDcuanBnP2M9/Mg"
-        
         result = await create_video(
             prompt="Cinematic shot, cậu bé chạy vui vẻ, 4k resolution",
-            filename_hint="veo3_correct",
+            filename_hint="veo3_json_test",
             image_url=target_image_url
         )
         
         if "error" in result:
             print(f"\n❌ ERROR: {result['error']}")
         else:
-            print(f"\n✅ SUCCESS: {result['url']}")
+            print(f"\n✅ SUCCESS: \n{result}")
             
     asyncio.run(main())
