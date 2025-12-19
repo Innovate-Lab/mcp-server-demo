@@ -86,6 +86,16 @@ curl -s -X POST "http://localhost:8000/mcp" \
 
 ```
 
+**Phân tích hình ảnh (analyze_image):**
+
+```bash
+curl -s -X POST "http://localhost:8000/mcp" \
+  -H "x-api-key: sk-1234" -H "mcp-session-id: <SESSION_ID>" \
+  -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","id":"t3","method":"tools/call","params":{"name":"analyze_image","arguments":{"image_url":"<URL>","mime_type":"image/png","prompt":"Extract the text in this image."}}}'
+
+```
+
 **Tạo video (create_video):**
 
 ```bash
@@ -132,3 +142,4 @@ MCP/
 - **Nguyễn Khánh Tài** - *Intake 2025* - University of Information Technology, VNUHCM (UIT)
 
 *Thứ tự các thành viên sắp xếp theo thứ tự bảng chữ cái theo tên*
+
