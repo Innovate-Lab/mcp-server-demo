@@ -98,7 +98,7 @@ def _normalize_single_prompt(prompt: str) -> str:
     p = (prompt or "").strip()
     if not p:
         raise ValueError("prompt is required")
-    return "TTS the following text exactly:\n" + p
+    return "TTS the following text:\n" + p
 
 def _normalize_multispeaker_prompt(prompt: str, speakers: list[str]) -> str:
     p = (prompt or "").strip()
