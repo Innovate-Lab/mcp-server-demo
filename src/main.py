@@ -44,7 +44,7 @@ async def create_visualization(
 async def text_to_speech(
     prompt: str,
     voice_name: str = "Kore",
-    multi_speaker_config: str | None = None,
+    multi_speaker_config: str | list[dict] | None = None,
     filename_hint: str | None = None,
 ) -> dict:
     return await audio.text_to_speech(
