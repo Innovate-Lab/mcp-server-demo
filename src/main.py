@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse
 from starlette.staticfiles import StaticFiles
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from src.auth import ApiKeyAuthMiddleware
 from src.config import BASE_DIR, settings
@@ -20,6 +21,11 @@ logger = logging.getLogger("mcp_server")
 mcp = FastMCP(
     "mcp-server-demo",
     stateless_http=False,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=settings.MCP_ALLOWED_HOSTS_LIST,
+        allowed_origins=settings.MCP_ALLOWED_ORIGINS_LIST,
+    ),
 )
 
 @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)

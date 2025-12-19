@@ -156,7 +156,6 @@ async def create_visualization(
     if not model:
         raise RuntimeError("GEMINI_IMAGE_MODEL is not configured")
 
-    # Keep prompt vendor-agnostic.
     size_hint = {
         "1K": "around 1024px on the long edge",
         "2K": "around 2048px on the long edge",
@@ -174,7 +173,13 @@ async def create_visualization(
 
     payload: Dict[str, Any] = {
         "contents": [{"role": "user", "parts": [{"text": full_prompt}]}],
-        "generationConfig": {"responseMimeType": "image/png"},
+        "generationConfig": {
+            "responseModalities": ["Image"],
+            "imageConfig": {
+                "aspectRatio": ar,
+                **({"imageSize": size} if "gemini-3" in model or "3-pro" in model else {}),
+            },
+        },
     }
 
     async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT_SECONDS) as client:
@@ -208,10 +213,6 @@ async def analyze_image(
     mime_type: str = "image/jpeg",
     prompt: str = "Describe this image in detail.",
 ) -> dict:
-    """Analyze an image using Gemini Vision API.
-
-    Provide either image_url (public) or image_base64.
-    """
     if not image_url and not image_base64:
         raise ValueError("Provide image_url or image_base64")
 

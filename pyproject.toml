@@ -15,5 +15,7 @@ dependencies = [
     "starlette",
     "pydantic-settings",
     "uvicorn",
-    "google-genai<=1.4.0"
+    "google-genai<=1.4.0",
+    "matplotlib",
+    "Pillow"
 ]

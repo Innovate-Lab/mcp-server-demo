@@ -24,6 +24,17 @@ class Settings(BaseSettings):
 
     MCP_TRANSPORT: str = Field(default="streamable-http", description="MCP transport")
 
+    MCP_ALLOWED_HOSTS: str = Field(default="localhost:*,127.0.0.1:*")
+    MCP_ALLOWED_ORIGINS: str = Field(default="http://localhost:*")
+
+    @property
+    def MCP_ALLOWED_HOSTS_LIST(self) -> list[str]:
+        return [x.strip() for x in self.MCP_ALLOWED_HOSTS.split(",") if x.strip()]
+
+    @property
+    def MCP_ALLOWED_ORIGINS_LIST(self) -> list[str]:
+        return [x.strip() for x in self.MCP_ALLOWED_ORIGINS.split(",") if x.strip()]
+
     # Logs
     LOG_LEVEL: str = Field(default="INFO", description="Log level")
 
@@ -41,7 +52,7 @@ class Settings(BaseSettings):
     )
 
     GEMINI_IMAGE_MODEL: str = Field(
-        default="gemini-2.0-flash-exp-image-generation",
+        default="gemini-2.5-flash-image",
         description="Model id for image generation",
     )
     GEMINI_VISION_MODEL: str = Field(
