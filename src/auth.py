@@ -8,10 +8,9 @@ from src.config import settings
 
 
 def verify_api_key(headers) -> None:
-
-    required_key = settings.MCP_API_KEY
+    required_key = (settings.MCP_API_KEY or "").strip()
     if not required_key:
-        return 
+        return
 
     provided = headers.get("x-api-key")
     if not provided:
@@ -21,8 +20,11 @@ def verify_api_key(headers) -> None:
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
-
     async def dispatch(self, request: Request, call_next) -> Response:
+        # Allow CORS preflight without auth
+        if request.method.upper() == "OPTIONS":
+            return await call_next(request)
+
         path = request.url.path or ""
         if path == "/health" or path.startswith("/static"):
             return await call_next(request)
