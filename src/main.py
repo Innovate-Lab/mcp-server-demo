@@ -129,6 +129,5 @@ if __name__ == "__main__":
         "src.main:app",
         host=settings.MCP_HOST,
         port=settings.MCP_PORT,
-        log_level=settings.LOG_LEVEL.lower(),
-        reload=True,
+        log_level=settings.LOG_LEVEL.lower()
     )

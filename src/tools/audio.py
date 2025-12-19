@@ -204,6 +204,7 @@ async def text_to_speech(
         data=wav_bytes,
         extension="wav",
         filename_hint=filename_hint or "speech",
+        mime_type="audio/wav"
     )
 
     return {
