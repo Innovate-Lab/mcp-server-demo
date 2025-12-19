@@ -14,5 +14,9 @@ dependencies = [
     "python-dotenv",
     "starlette",
     "pydantic-settings",
-    "uvicorn"
+    "uvicorn",
+    "google-generativeai[cli]>=0.8.6",
+    "aiohttp[cli]>=3.13.2",
+    "google[cli]>=3.0.0",
+    "google-genai>=1.56.0",
 ]
