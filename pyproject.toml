@@ -14,5 +14,6 @@ dependencies = [
     "python-dotenv",
     "starlette",
     "pydantic-settings",
-    "uvicorn"
+    "uvicorn",
+    "google-genai<=1.4.0"
 ]
